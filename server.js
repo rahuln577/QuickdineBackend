@@ -7,7 +7,28 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const app = express();
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: 'https://flourishing-peony-e65bc5.netlify.app',
+  credentials: true,
+  optionsSuccessStatus: 200,
+  exposedHeaders: [
+    'x-razorpay-signature',
+    'x-rtb-fingerprint-id',
+    'x-razorpay-order-id',
+    'content-type',
+    'authorization'
+  ],
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With',
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'x-razorpay-signature'
+  ]
+};
+
+app.use(cors(corsOptions));
 app.use(bodyParser.json());
 
 // Routes
