@@ -57,7 +57,7 @@ const verifyPayment = async (req, res) => {
 
   // 1. Generate HMAC-SHA256 signature
   const generated_signature = crypto
-    .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(`${order_id}|${payment_id}`)
     .digest('hex');
 
