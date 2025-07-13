@@ -1,5 +1,6 @@
 const { db } = require('../config/firebase');
 const razorpay = require('../config/razorpay');
+const { FieldValue } = require('firebase-admin/firestore');
 
 const createOrder = async (req, res) => {
   try {
@@ -23,7 +24,7 @@ const createOrder = async (req, res) => {
       userId,
       items,
       orderType: orderType || 'dine_in',
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: FieldValue.serverTimestamp()
     });
 
     res.json({
