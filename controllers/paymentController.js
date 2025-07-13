@@ -1,6 +1,6 @@
 const { getDB } = require('../config/firebase'); // Changed to use getDB
-const razorpay = require('../config/razorpay');
 const crypto = require('crypto');
+const Razorpay = require('razorpay');
 
 const createOrder = async (req, res) => {
   try {
@@ -47,8 +47,6 @@ const createOrder = async (req, res) => {
   }
 };
 
-const Razorpay = require('razorpay');
-
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
@@ -75,7 +73,7 @@ const verifyPayment = async (req, res) => {
 
     // Verify payment status through API
     const payment = await razorpay.payments.fetch(paymentId);
-    
+
     if (payment.status !== 'captured') {
       return res.status(400).json({
         success: false,
