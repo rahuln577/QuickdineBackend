@@ -18,7 +18,7 @@ const createOrder = async (req, res) => {
     const db = getDB();
     const ordersRef = db.ref('orders');
     const newOrderRef = ordersRef.push(); // Generates a new unique ID
-    
+
     await newOrderRef.set({
       razorpayOrderId: razorpayOrder.id,
       status: 'created',
@@ -39,9 +39,9 @@ const createOrder = async (req, res) => {
 
   } catch (error) {
     console.error('Error creating order:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to create order',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -51,62 +51,82 @@ const verifyPayment = async (req, res) => {
     const { orderId, paymentId, signature } = req.body;
     const userId = req.user.uid;
 
-    // Verify signature
-    const generatedSignature = razorpay.webhooks.generateSignature(
-      orderId + "|" + paymentId,
-      process.env.RAZORPAY_WEBHOOK_SECRET
-    );
+    // 1. Verify the signature manually
+    const crypto = require('crypto');
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+      .update(orderId + "|" + paymentId)
+      .digest('hex');
 
-    if (generatedSignature !== signature) {
-      return res.status(400).json({ error: 'Invalid signature' });
+    if (expectedSignature !== signature) {
+      console.error('Signature verification failed', {
+        expected: expectedSignature,
+        received: signature
+      });
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid signature'
+      });
     }
 
-    // Update order in Realtime Database
-    const db = getDB();
+    // 2. Verify payment with Razorpay API
+    const payment = await razorpay.payments.fetch(paymentId);
+
+    if (!payment || payment.status !== 'captured') {
+      return res.status(400).json({
+        success: false,
+        error: payment ? `Payment not captured (status: ${payment.status})` : 'Payment not found'
+      });
+    }
+
+    // 3. Find and update the order
     const ordersRef = db.ref('orders');
-    
-    // Find order by razorpayOrderId and userId
     const snapshot = await ordersRef
       .orderByChild('razorpayOrderId')
       .equalTo(orderId)
       .once('value');
 
     if (!snapshot.exists()) {
-      return res.status(404).json({ error: 'Order not found' });
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
     }
 
     let orderKey = null;
-    let orderData = null;
-    
     snapshot.forEach((childSnapshot) => {
       if (childSnapshot.val().userId === userId) {
         orderKey = childSnapshot.key;
-        orderData = childSnapshot.val();
       }
     });
 
     if (!orderKey) {
-      return res.status(404).json({ error: 'Order not found for user' });
+      return res.status(403).json({
+        success: false,
+        error: 'Order does not belong to user'
+      });
     }
 
-    // Update the order
     await ordersRef.child(orderKey).update({
       status: 'paid',
       paymentId,
       paymentSignature: signature,
-      paidAt: Date.now()
+      paidAt: Date.now(),
+      paymentStatus: payment.status
     });
 
-    res.json({ 
-      success: true, 
-      orderId: orderKey 
+    res.json({
+      success: true,
+      orderId: orderKey,
+      paymentStatus: payment.status
     });
 
   } catch (error) {
-    console.error('Payment verification error:', error);
-    res.status(500).json({ 
+    console.error('Payment verification failed:', error);
+    res.status(500).json({
+      success: false,
       error: 'Payment verification failed',
-      details: error.message 
+      details: error.message
     });
   }
 };
