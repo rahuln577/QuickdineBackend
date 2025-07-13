@@ -1,5 +1,6 @@
 const { getDB } = require('../config/firebase'); // Changed to use getDB
 const razorpay = require('../config/razorpay');
+const crypto = require('crypto');
 
 const createOrder = async (req, res) => {
   try {
@@ -49,80 +50,53 @@ const createOrder = async (req, res) => {
 const verifyPayment = async (req, res) => {
   try {
     const { orderId, paymentId, signature } = req.body;
-    const userId = req.user.uid;
+    
+    // 1. Create the HMAC SHA256 signature
+    const hmac = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET);
+    hmac.update(`${orderId}|${paymentId}`);
+    const generatedSignature = hmac.digest('hex');
 
-    // 1. Verify the signature manually
-    const crypto = require('crypto');
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
-      .update(orderId + "|" + paymentId)
-      .digest('hex');
-
-    if (expectedSignature !== signature) {
-      console.error('Signature verification failed', {
-        expected: expectedSignature,
-        received: signature
-      });
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid signature'
-      });
-    }
-
-    // 2. Verify payment with Razorpay API
-    const payment = await razorpay.payments.fetch(paymentId);
-
-    if (!payment || payment.status !== 'captured') {
-      return res.status(400).json({
-        success: false,
-        error: payment ? `Payment not captured (status: ${payment.status})` : 'Payment not found'
-      });
-    }
-
-    // 3. Find and update the order
-    const ordersRef = db.ref('orders');
-    const snapshot = await ordersRef
-      .orderByChild('razorpayOrderId')
-      .equalTo(orderId)
-      .once('value');
-
-    if (!snapshot.exists()) {
-      return res.status(404).json({
-        success: false,
-        error: 'Order not found'
-      });
-    }
-
-    let orderKey = null;
-    snapshot.forEach((childSnapshot) => {
-      if (childSnapshot.val().userId === userId) {
-        orderKey = childSnapshot.key;
-      }
+    // Debug logs (remove in production)
+    console.log('Signature Verification:', {
+      input: `${orderId}|${paymentId}`,
+      generated: generatedSignature,
+      received: signature,
+      secretPresent: !!process.env.RAZORPAY_WEBHOOK_SECRET
     });
 
-    if (!orderKey) {
-      return res.status(403).json({
+    // 2. Verify the signatures match
+    if (generatedSignature !== signature) {
+      return res.status(400).json({
         success: false,
-        error: 'Order does not belong to user'
+        error: 'Invalid signature',
+        debug: {
+          expectedLength: generatedSignature.length,
+          receivedLength: signature.length
+        }
       });
     }
 
-    await ordersRef.child(orderKey).update({
+    // 3. Verify payment status with Razorpay API
+    const payment = await razorpay.payments.fetch(paymentId);
+    if (payment.status !== 'captured') {
+      return res.status(400).json({
+        success: false,
+        error: `Payment status: ${payment.status}`
+      });
+    }
+
+    // 4. Update your database
+    await updateOrderStatus(orderId, {
       status: 'paid',
       paymentId,
       paymentSignature: signature,
-      paidAt: Date.now(),
-      paymentStatus: payment.status
+      paidAt: new Date()
     });
 
-    res.json({
-      success: true,
-      orderId: orderKey,
-      paymentStatus: payment.status
-    });
+    res.json({ success: true });
 
   } catch (error) {
-    console.error('Payment verification failed:', error);
+    console.error('Verification failed:', error);
     res.status(500).json({
       success: false,
       error: 'Payment verification failed',
