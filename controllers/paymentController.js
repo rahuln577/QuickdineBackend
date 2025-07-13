@@ -47,37 +47,35 @@ const createOrder = async (req, res) => {
   }
 };
 
+const Razorpay = require('razorpay');
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+});
+
 const verifyPayment = async (req, res) => {
   try {
     const { orderId, paymentId, signature } = req.body;
-    
-    // 1. Create the HMAC SHA256 signature
-    const hmac = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET);
-    hmac.update(`${orderId}|${paymentId}`);
-    const generatedSignature = hmac.digest('hex');
 
-    // Debug logs (remove in production)
-    console.log('Signature Verification:', {
-      input: `${orderId}|${paymentId}`,
-      generated: generatedSignature,
-      received: signature,
-      secretPresent: !!process.env.RAZORPAY_WEBHOOK_SECRET
-    });
+    // Razorpay's official verification method
+    const isValid = razorpay.validateWebhookSignature(
+      `${orderId}|${paymentId}`,
+      signature,
+      process.env.RAZORPAY_WEBHOOK_SECRET
+    );
 
-    // 2. Verify the signatures match
-    if (generatedSignature !== signature) {
+    if (!isValid) {
       return res.status(400).json({
         success: false,
         error: 'Invalid signature',
-        debug: {
-          expectedLength: generatedSignature.length,
-          receivedLength: signature.length
-        }
+        message: 'Payment verification failed'
       });
     }
 
-    // 3. Verify payment status with Razorpay API
+    // Verify payment status through API
     const payment = await razorpay.payments.fetch(paymentId);
+    
     if (payment.status !== 'captured') {
       return res.status(400).json({
         success: false,
@@ -85,7 +83,7 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    // 4. Update your database
+    // Update your database
     await updateOrderStatus(orderId, {
       status: 'paid',
       paymentId,
@@ -96,7 +94,7 @@ const verifyPayment = async (req, res) => {
     res.json({ success: true });
 
   } catch (error) {
-    console.error('Verification failed:', error);
+    console.error('Payment verification failed:', error);
     res.status(500).json({
       success: false,
       error: 'Payment verification failed',
