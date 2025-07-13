@@ -1,14 +1,20 @@
 const admin = require('firebase-admin');
-const serviceAccount = require('/etc/secrets/serviceAccountKey.json');
 
-function initializeFirebase() {
+async function initializeFirebase() {
   if (!admin.apps.length) {
     try {
+      // Load service account (supports both file and env var)
+      const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
+        ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+        : require('/etc/secrets/serviceAccountKey.json');
+
+      // Initialize with Realtime Database config
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://zomswig-c47e3-default-rtdb.firebaseio.com/'
       });
-      console.log('Firebase Admin initialized successfully for Realtime Database');
+
+      console.log('Firebase Admin initialized successfully');
     } catch (error) {
       console.error('Firebase initialization error:', error);
       throw error;
@@ -18,7 +24,7 @@ function initializeFirebase() {
 }
 
 // Test Realtime Database connection
-async function testRealtimeDBConnection(db) {
+async function testRTDBConnection(db) {
   try {
     await db.ref('.info/connected').once('value');
     console.log('Realtime Database connection verified');
@@ -30,39 +36,61 @@ async function testRealtimeDBConnection(db) {
 }
 
 // Initialize with retry logic
-async function getFirebaseWithRetry(maxRetries = 3) {
+async function initializeFirebaseServices(maxRetries = 3) {
   let lastError;
   
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const adminInstance = initializeFirebase();
-      const db = adminInstance.database(); // Use database() for Realtime DB
-      await testRealtimeDBConnection(db);
+      const adminInstance = await initializeFirebase();
+      const db = adminInstance.database();
+      const auth = adminInstance.auth(); // Get auth instance
+      
+      await testRTDBConnection(db);
       
       return { 
-        admin: adminInstance, 
-        db: db, 
-        auth: adminInstance.auth() 
+        admin: adminInstance,
+        db,
+        auth // Make sure auth is included
       };
     } catch (error) {
       lastError = error;
-      console.warn(`Attempt ${i + 1} failed. Retrying...`);
+      console.warn(`Initialization attempt ${i + 1} failed. Retrying...`);
       await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
     }
   }
   throw lastError;
 }
 
-// Export initialized services
+// Singleton pattern with immediate initialization
 let firebaseServices;
-const initPromise = getFirebaseWithRetry().then(services => {
-  firebaseServices = services;
-  return services;
-});
+
+(async () => {
+  try {
+    firebaseServices = await initializeFirebaseServices();
+    console.log('Firebase services initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize Firebase services:', error);
+    process.exit(1); // Fail fast if initialization fails
+  }
+})();
 
 module.exports = {
-  getFirebase: () => firebaseServices || initPromise,
-  admin: () => firebaseServices?.admin,
-  db: () => firebaseServices?.db,
-  auth: () => firebaseServices?.auth
+  getAuth: () => {
+    if (!firebaseServices) {
+      throw new Error('Firebase services not initialized yet');
+    }
+    return firebaseServices.auth; // Proper auth instance with verifyIdToken
+  },
+  getDB: () => {
+    if (!firebaseServices) {
+      throw new Error('Firebase services not initialized yet');
+    }
+    return firebaseServices.db;
+  },
+  getAdmin: () => {
+    if (!firebaseServices) {
+      throw new Error('Firebase services not initialized yet');
+    }
+    return firebaseServices.admin;
+  }
 };
