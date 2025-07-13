@@ -1,12 +1,64 @@
 const admin = require('firebase-admin');
 const serviceAccount = require('/etc/secrets/serviceAccountKey.json');
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL
-});
 
-const db = admin.firestore();
-const auth = admin.auth();
+function initializeFirebase() {
+  if (!admin.apps.length) {
+    try {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: process.env.FIREBASE_DATABASE_URL,
+        // Add these settings for better connection handling
+        firestore: {
+          settings: {
+            ignoreUndefinedProperties: true,
+            maxIdleChannels: 10,
+            grpcOptions: {
+              'grpc.keepalive_time_ms': 30000,
+              'grpc.max_receive_message_length': 1024 * 1024 * 50 // 50MB
+            }
+          }
+        }
+      });
+      console.log('Firebase Admin initialized successfully');
+    } catch (error) {
+      console.error('Firebase initialization error:', error);
+      throw error;
+    }
+  }
+  return admin;
+}
+
+// Connection test function
+async function testFirestoreConnection(db) {
+  try {
+    await db.listCollections(); // Simple operation to test connection
+    console.log('Firestore connection verified');
+    return true;
+  } catch (error) {
+    console.error('Firestore connection test failed:', error);
+    throw error;
+  }
+}
+
+// Initialize with retry logic
+async function getFirebaseWithRetry(maxRetries = 3) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const admin = initializeFirebase();
+      const db = admin.firestore();
+      await testFirestoreConnection(db);
+      return { admin, db, auth: admin.auth() };
+    } catch (error) {
+      lastError = error;
+      console.warn(`Attempt ${i + 1} failed. Retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  throw lastError;
+}
+
+module.exports = getFirebaseWithRetry();
 
 module.exports = { admin, db, auth };
