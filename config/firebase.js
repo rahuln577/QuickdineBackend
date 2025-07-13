@@ -5,22 +5,14 @@ const serviceAccount = require('/etc/secrets/serviceAccountKey.json');
 function initializeFirebase() {
   if (!admin.apps.length) {
     try {
+
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
-        // Add these settings for better connection handling
-        firestore: {
-          settings: {
-            ignoreUndefinedProperties: true,
-            maxIdleChannels: 10,
-            grpcOptions: {
-              'grpc.keepalive_time_ms': 30000,
-              'grpc.max_receive_message_length': 1024 * 1024 * 50 // 50MB
-            }
-          }
-        }
+        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://zomswig-c47e3-default-rtdb.firebaseio.com/'
       });
-      console.log('Firebase Admin initialized successfully');
+
+      console.log('Firebase Admin initialized successfully for Realtime Database');
+      return admin;
     } catch (error) {
       console.error('Firebase initialization error:', error);
       throw error;
