@@ -1,6 +1,5 @@
-const { db } = require('../config/firebase');
+const { getDB } = require('../config/firebase'); // Changed to use getDB
 const razorpay = require('../config/razorpay');
-const { FieldValue } = require('firebase-admin/firestore');
 
 const createOrder = async (req, res) => {
   try {
@@ -15,8 +14,12 @@ const createOrder = async (req, res) => {
       payment_capture: 1
     });
 
-    // Save to Firestore
-    const orderRef = await db.collection('orders').add({
+    // Save to Realtime Database
+    const db = getDB();
+    const ordersRef = db.ref('orders');
+    const newOrderRef = ordersRef.push(); // Generates a new unique ID
+    
+    await newOrderRef.set({
       razorpayOrderId: razorpayOrder.id,
       status: 'created',
       amount,
@@ -24,19 +27,22 @@ const createOrder = async (req, res) => {
       userId,
       items,
       orderType: orderType || 'dine_in',
-      createdAt: FieldValue.serverTimestamp()
+      createdAt: Date.now() // Using Date.now() instead of serverTimestamp
     });
 
     res.json({
       id: razorpayOrder.id,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
-      firebaseOrderId: orderRef.id
+      firebaseOrderId: newOrderRef.key // Using the RTDB generated key
     });
 
   } catch (error) {
     console.error('Error creating order:', error);
-    res.status(500).json({ error: 'Failed to create order' });
+    res.status(500).json({ 
+      error: 'Failed to create order',
+      details: error.message 
+    });
   }
 };
 
@@ -55,31 +61,54 @@ const verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Invalid signature' });
     }
 
-    // Update order in Firestore
-    const ordersRef = db.collection('orders');
-    const query = await ordersRef
-      .where('razorpayOrderId', '==', orderId)
-      .where('userId', '==', userId)
-      .limit(1)
-      .get();
+    // Update order in Realtime Database
+    const db = getDB();
+    const ordersRef = db.ref('orders');
+    
+    // Find order by razorpayOrderId and userId
+    const snapshot = await ordersRef
+      .orderByChild('razorpayOrderId')
+      .equalTo(orderId)
+      .once('value');
 
-    if (query.empty) {
+    if (!snapshot.exists()) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    const orderDoc = query.docs[0];
-    await orderDoc.ref.update({
+    let orderKey = null;
+    let orderData = null;
+    
+    snapshot.forEach((childSnapshot) => {
+      if (childSnapshot.val().userId === userId) {
+        orderKey = childSnapshot.key;
+        orderData = childSnapshot.val();
+      }
+    });
+
+    if (!orderKey) {
+      return res.status(404).json({ error: 'Order not found for user' });
+    }
+
+    // Update the order
+    await ordersRef.child(orderKey).update({
       status: 'paid',
       paymentId,
       paymentSignature: signature,
-      paidAt: admin.firestore.FieldValue.serverTimestamp()
+      paidAt: Date.now()
     });
 
-    res.json({ success: true, orderId: orderDoc.id });
+    res.json({ 
+      success: true, 
+      orderId: orderKey 
+    });
 
   } catch (error) {
     console.error('Payment verification error:', error);
-    res.status(500).json({ error: 'Payment verification failed' });
+    res.status(500).json({ 
+      error: 'Payment verification failed',
+      details: error.message 
+    });
   }
 };
+
 module.exports = { createOrder, verifyPayment };
