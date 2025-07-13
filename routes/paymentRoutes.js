@@ -47,64 +47,46 @@ router.post('/:orderId/fail', authenticate, async (req, res) => {
     }
 });
 
-router.post('/:orderId/cancel', async (req, res) => {
+router.post('/:orderId/cancel', authenticate, async (req, res) => {
     try {
         const { orderId } = req.params;
-        const { userId, reason } = req.body; // userId for authorization
+        const userId = req.user.uid; // Get from authenticated user
+
+        // Get the order first to verify ownership
+        const orderRef = db.ref(`orders/${orderId}`);
+        const snapshot = await orderRef.once('value');
         
-        // Validate order exists
-        const orderRef = firestore.collection('orders').doc(orderId);
-        const orderDoc = await orderRef.get();
+        if (!snapshot.exists()) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        const orderData = snapshot.val();
         
-        if (!orderDoc.exists) {
-            return res.status(404).json({ 
-                success: false,
-                message: 'Order not found'
+        // Verify the user owns this order
+        if (orderData.userId !== userId) {
+            return res.status(403).json({ error: 'Not authorized to cancel this order' });
+        }
+
+        // Only allow cancellation if order is still pending
+        if (orderData.status !== 'created') {
+            return res.status(400).json({ 
+                error: `Order cannot be cancelled in current state (${orderData.status})`
             });
         }
-        
-        const orderData = orderDoc.data();
-        
-        // Authorization - only customer or restaurant can cancel
-        if (orderData.customerUid !== userId && orderData.restaurantUid !== userId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Unauthorized to cancel this order'
-            });
-        }
-        
-        // Only allow cancellation if order is pending
-        if (orderData.status !== 'pending') {
-            return res.status(400).json({
-                success: false,
-                message: `Order cannot be cancelled in its current state (${orderData.status})`
-            });
-        }
-        
+
         // Update order status to cancelled
         await orderRef.update({
             status: 'cancelled',
-            cancelledAt: new Date(),
-            cancellationReason: reason || 'User requested cancellation',
-            updatedAt: new Date(),
+            cancelledAt: Date.now(),
             cancelledBy: userId
         });
-        
-        // Optionally: Initiate refund if payment was captured
-        if (orderData.paymentStatus === 'captured') {
-            await initiateRefund(orderId, orderData.totalAmount);
-        }
-        
-        res.json({ 
-            success: true,
-            message: 'Order cancelled successfully'
-        });
-        
+
+        res.json({ success: true });
     } catch (error) {
-        console.error('Failed to cancel order:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Internal server error'
+        console.error('Error cancelling order:', error);
+        res.status(500).json({ 
+            error: 'Failed to cancel order',
+            details: error.message 
         });
     }
 });
