@@ -60,5 +60,3 @@ async function getFirebaseWithRetry(maxRetries = 3) {
 }
 
 module.exports = getFirebaseWithRetry();
-
-module.exports = { admin, db, auth };
