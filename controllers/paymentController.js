@@ -4,38 +4,67 @@ const Razorpay = require('razorpay');
 
 const createOrder = async (req, res) => {
   try {
-    const { amount, currency, items, orderType } = req.body;
+    const { amount, currency, items, orderType, orderData } = req.body;
     const userId = req.user.uid;
+    const user = req.user; // Assuming you have the user object from auth middleware
 
     // Create Razorpay order
     const razorpayOrder = await razorpay.orders.create({
-      amount: amount * 100,
+      amount: amount * 100, // Razorpay expects amount in paise
       currency: currency || 'INR',
       receipt: `receipt_${Date.now()}`,
       payment_capture: 1
     });
 
-    // Save to Realtime Database
+    // Get database reference
     const db = getDB();
-    const ordersRef = db.ref('orders');
-    const newOrderRef = ordersRef.push(); // Generates a new unique ID
-
-    await newOrderRef.set({
+    
+    // Create paths matching the frontend structure
+    const customerOrderRef = db.ref(`CustomerUsers/${userId}/orderHistory`).push();
+    const globalOrderRef = db.ref('orders').push();
+    
+    // Prepare order data matching the frontend structure
+    const firebaseOrderData = {
+      // Razorpay information
       razorpayOrderId: razorpayOrder.id,
-      status: 'created',
-      amount,
-      currency: currency || 'INR',
-      userId,
-      items,
+      
+      // Order metadata
+      orderNumber: `ORD-${Date.now()}`,
+      restaurantName: orderData?.restaurantName || 'Unknown Restaurant',
+      restaurantAddress: orderData?.restaurantAddress || '',
+      restaurantUid: orderData?.restaurantUid || '',
+      totalPrice: amount,
+      status: 'created', // Will transition to 'paid' after successful payment
+      timestamp: Date.now(),
+      customerName: user.displayName || 'Customer',
+      customerUid: userId,
+      
+      // Order items (standardized format)
+      items: items.map(item => ({
+        name: item.name || item.foodName || 'Unknown Item',
+        price: item.price || 0,
+        quantity: item.quantity || 1
+      })),
+      
+      // Additional fields
       orderType: orderType || 'dine_in',
-      createdAt: Date.now() // Using Date.now() instead of serverTimestamp
-    });
+      createdAt: Date.now(),
+      
+      // References
+      globalOrderId: globalOrderRef.key, // Link to global orders collection
+      customerOrderId: customerOrderRef.key // Link to customer's order history
+    };
+
+    // Save to both locations (transaction would be better here)
+    await customerOrderRef.set(firebaseOrderData);
+    await globalOrderRef.set(firebaseOrderData);
 
     res.json({
       id: razorpayOrder.id,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
-      firebaseOrderId: newOrderRef.key // Using the RTDB generated key
+      firebaseOrderId: customerOrderRef.key, // Return the customer-specific ID
+      orderData: firebaseOrderData // Return full order data for client-side use
     });
 
   } catch (error) {
