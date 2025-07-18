@@ -4,43 +4,8 @@ const Razorpay = require('razorpay');
 
 const createOrder = async (req, res) => {
   try {
-    const {
-      amount,
-      currency = 'INR', // Default to INR if not provided
-      items,
-      orderType = 'dine_in', // Default to dine_in
-      restaurantUid,
-      restaurantName,
-      restaurantAddress,
-      customerName,
-      customerUid, // userId will come from this
-      // Include any other fields you expect from the frontend
-    } = req.body;
-
-    // Validate required fields
-    if (!amount || !items || !restaurantUid || !customerUid) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    await newOrderRef.set({
-      razorpayOrderId: razorpayOrder.id,
-      status: 'created',
-      amount: Number(amount), // Ensure it's a number
-      currency,
-      userId: customerUid, // Using the customerUid from request
-      items: Array.isArray(items) ? items : [], // Ensure items is an array
-      orderType,
-      restaurantUid,
-      restaurantName: restaurantName || 'Unknown Restaurant',
-      restaurantAddress: restaurantAddress || '',
-      customerName: customerName || '',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(), // Better than Date.now()
-      // Additional metadata
-      paymentGateway: 'razorpay',
-      platform: 'web', // Can detect from headers if needed
-      orderNumber: `ORD-${Date.now()}-${Math.floor(Math.random() * 1000)}` // Simple order number
-    });
-
+    const { amount, currency, items, orderType } = req.body;
+    const userId = req.user.uid;
 
     // Create Razorpay order
     const razorpayOrder = await razorpay.orders.create({
@@ -57,22 +22,13 @@ const createOrder = async (req, res) => {
 
     await newOrderRef.set({
       razorpayOrderId: razorpayOrder.id,
-      status: 'created',  // Initial status
-      amount: totalPrice,  // Should match the payment amount
-      currency: 'INR',     // Fixed as INR or use parameter
-      userId: customerUid, // From your frontend data
-      items: orderItems,   // The mapped items array
-      orderType: orderType || 'dine_in',  // Default to dine_in
-      restaurantUid: restaurantUid,
-      restaurantName: restaurantName,
-      restaurantAddress: restaurantAddress,
-      userId: userId,
-      customerName: customerName,  // From frontend
-      orderNumber: generateOrderNumber(), // You might want to generate this
-      timestamp: Date.now(),       // Using client timestamp
-      // Additional useful fields:
-      paymentGateway: 'razorpay',
-      platform: 'web'             // or 'android'/'ios' if applicable
+      status: 'created',
+      amount,
+      currency: currency || 'INR',
+      userId,
+      items,
+      orderType: orderType || 'dine_in',
+      createdAt: Date.now() // Using Date.now() instead of serverTimestamp
     });
 
     res.json({
