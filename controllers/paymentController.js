@@ -34,15 +34,15 @@ const createOrder = async (req, res) => {
       restaurantUid
     }
 
-    get(latestOrderNumberRef).then((snapshot) => {
+    latestOrderNumberRef.get().then((snapshot) => {
       let currentNumber = snapshot.exists() ? snapshot.val() : 99; // Start from 99 so next is 100
       let newOrderNumber = currentNumber >= 500 ? 100 : currentNumber + 1;
 
-      return set(latestOrderNumberRef, newOrderNumber)
+      return latestOrderNumberRef.set(newOrderNumber)
         .then(async () => {
           await Promise.all([
             newOrderRef.set(orderData),
-            db.ref(`orders/${restaurantUid}/latestOrderNumber`).set(orderNumber),
+            db.ref(`orders/${restaurantUid}/latestOrderNumber`).set(newOrderNumber),
             db.ref(`CustomerUsers/${currentUser.uid}/orderHistory/${newOrderRef.key}`).set(orderData)
           ]);
         });
