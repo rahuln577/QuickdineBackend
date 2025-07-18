@@ -51,26 +51,20 @@ const createOrder = async (req, res) => {
         console.error("Order processing error:", error);
       });
 
+    res.json({
+      id: razorpayOrder.id,
+      amount: razorpayOrder.amount,
+      currency: razorpayOrder.currency,
+      firebaseOrderId: newOrderRef.key // Using the RTDB generated key
+    });
+
   } catch (error) {
-    console.error('Error updating database:', error);
-    // Handle error appropriately
+    console.error('Error creating order:', error);
+    res.status(500).json({
+      error: 'Failed to create order',
+      details: error.message
+    });
   }
-
-
-  res.json({
-    id: razorpayOrder.id,
-    amount: razorpayOrder.amount,
-    currency: razorpayOrder.currency,
-    firebaseOrderId: newOrderRef.key // Using the RTDB generated key
-  });
-
-} catch (error) {
-  console.error('Error creating order:', error);
-  res.status(500).json({
-    error: 'Failed to create order',
-    details: error.message
-  });
-}
 };
 
 const razorpay = new Razorpay({
