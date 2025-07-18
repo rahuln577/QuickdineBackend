@@ -18,8 +18,16 @@ const createOrder = async (req, res) => {
     // Save to Realtime Database
     const db = getDB();
     const ordersRef = db.ref(`orders/${restaurantUid}`);
-    const newOrderRef = ordersRef.push(); // Generates a new unique ID
-    const latestOrderNumberRef = ordersRef.child('latestOrderNumber');
+    const newOrderRef = ordersRef.push();
+    
+    // Transaction to safely increment order number
+    const latestOrderNumberRef = db.ref(`orders/${restaurantUid}/latestOrderNumber`);
+    const { snapshot } = await latestOrderNumberRef.transaction((currentNumber) => {
+      return (currentNumber || 99) + 1;
+    });
+
+    const newOrderNumber = snapshot.val() >= 500 ? 100 : snapshot.val();
+    
     const orderData = {
       razorpayOrderId: razorpayOrder.id,
       status: 'created',
@@ -31,31 +39,25 @@ const createOrder = async (req, res) => {
       timestamp: Date.now(),
       customerUid,
       restaurantName,
-      restaurantUid
-    }
+      restaurantUid,
+      orderNumber: newOrderNumber
+    };
 
-    latestOrderNumberRef.get().then((snapshot) => {
-      let currentNumber = snapshot.exists() ? snapshot.val() : 99; // Start from 99 so next is 100
-      let newOrderNumber = currentNumber >= 500 ? 100 : currentNumber + 1;
+    // Save all data in one atomic operation
+    const updates = {
+      [`orders/${restaurantUid}/${newOrderRef.key}`]: orderData,
+      [`orders/${restaurantUid}/latestOrderNumber`]: newOrderNumber,
+      [`CustomerUsers/${userId}/orderHistory/${newOrderRef.key}`]: orderData
+    };
 
-      return latestOrderNumberRef.set(newOrderNumber)
-        .then(async () => {
-          await Promise.all([
-            newOrderRef.set(orderData),
-            db.ref(`orders/${restaurantUid}/latestOrderNumber`).set(newOrderNumber),
-            db.ref(`CustomerUsers/${currentUser.uid}/orderHistory/${newOrderRef.key}`).set(orderData)
-          ]);
-        });
-    })
-      .catch(error => {
-        console.error("Order processing error:", error);
-      });
+    await db.ref().update(updates);
 
     res.json({
       id: razorpayOrder.id,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
-      firebaseOrderId: newOrderRef.key // Using the RTDB generated key
+      firebaseOrderId: newOrderRef.key,
+      orderNumber: newOrderNumber
     });
 
   } catch (error) {
