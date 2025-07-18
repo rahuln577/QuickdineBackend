@@ -4,7 +4,7 @@ const Razorpay = require('razorpay');
 
 const createOrder = async (req, res) => {
   try {
-    const { amount, currency, items, orderType } = req.body;
+    const { amount, currency, items, orderType, customerUid, restaurantName, restaurantUid } = req.body;
     const userId = req.user.uid;
 
     // Create Razorpay order
@@ -17,34 +17,60 @@ const createOrder = async (req, res) => {
 
     // Save to Realtime Database
     const db = getDB();
-    const ordersRef = db.ref('orders');
+    const ordersRef = db.ref(`orders/${restaurantUid}`);
     const newOrderRef = ordersRef.push(); // Generates a new unique ID
-
-    await newOrderRef.set({
+    const latestOrderNumberRef = child(ordersRef, 'latestOrderNumber');
+    const orderData = {
       razorpayOrderId: razorpayOrder.id,
       status: 'created',
-      amount,
+      totalPrice: amount,
       currency: currency || 'INR',
       userId,
       items,
       orderType: orderType || 'dine_in',
-      createdAt: Date.now() // Using Date.now() instead of serverTimestamp
-    });
+      timestamp: Date.now(),
+      customerUid,
+      restaurantName,
+      restaurantUid
+    }
 
-    res.json({
-      id: razorpayOrder.id,
-      amount: razorpayOrder.amount,
-      currency: razorpayOrder.currency,
-      firebaseOrderId: newOrderRef.key // Using the RTDB generated key
-    });
+    get(latestOrderNumberRef).then((snapshot) => {
+      let currentNumber = snapshot.exists() ? snapshot.val() : 99; // Start from 99 so next is 100
+      let newOrderNumber = currentNumber >= 500 ? 100 : currentNumber + 1;
+
+      return set(latestOrderNumberRef, newOrderNumber)
+        .then(async () => {
+          await Promise.all([
+            newOrderRef.set(orderData),
+            db.ref(`orders/${restaurantUid}/latestOrderNumber`).set(orderNumber),
+            db.ref(`CustomerUsers/${currentUser.uid}/orderHistory/${newOrderRef.key}`).set(orderData)
+          ]);
+        });
+    })
+      .catch(error => {
+        console.error("Order processing error:", error);
+      });
 
   } catch (error) {
-    console.error('Error creating order:', error);
-    res.status(500).json({
-      error: 'Failed to create order',
-      details: error.message
-    });
+    console.error('Error updating database:', error);
+    // Handle error appropriately
   }
+
+
+  res.json({
+    id: razorpayOrder.id,
+    amount: razorpayOrder.amount,
+    currency: razorpayOrder.currency,
+    firebaseOrderId: newOrderRef.key // Using the RTDB generated key
+  });
+
+} catch (error) {
+  console.error('Error creating order:', error);
+  res.status(500).json({
+    error: 'Failed to create order',
+    details: error.message
+  });
+}
 };
 
 const razorpay = new Razorpay({
