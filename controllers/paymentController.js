@@ -19,7 +19,7 @@ const createOrder = async (req, res) => {
     const db = getDB();
     const ordersRef = db.ref(`orders/${restaurantUid}`);
     const newOrderRef = ordersRef.push(); // Generates a new unique ID
-    const latestOrderNumberRef = child(ordersRef, 'latestOrderNumber');
+    const latestOrderNumberRef = ordersRef.child('latestOrderNumber');
     const orderData = {
       razorpayOrderId: razorpayOrder.id,
       status: 'created',
